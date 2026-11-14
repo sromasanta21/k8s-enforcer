@@ -1,0 +1,106 @@
+#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  storage:
+    layout:
+      name: lvm
+      sizing-policy: all
+  network:
+    version: 2
+    ethernets:
+      all-en:
+        match:
+          name: "e*"
+        addresses:
+          - 44.44.210.61/24
+        routes:
+          - to: default
+            via: 44.44.210.1
+        nameservers:
+          addresses:
+            - 8.8.8.8
+            - 1.1.1.1
+  identity:
+    hostname: k8s-master
+    username: sromasan
+    password: "$6$rounds=4096$purduelab$9Q/1R.z5L8zX0kC1.A8kR0xR6K9V2vT5b2mH0jZ3e4S5L6P7w8Q9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5."
+  ssh:
+    install-server: true
+    allow-pw: true
+  packages:
+    - curl
+    - gpg
+    - apt-transport-https
+    - ca-certificates
+    - openssl
+  user-data:
+    write_files:
+      - path: /etc/modules-load.d/k8s.conf
+        content: |
+          overlay
+          br_netfilter
+      - path: /etc/sysctl.d/k8s.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables  = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.ipv4.ip_forward                 = 1
+      - path: /usr/local/bin/setup-k8s-master.sh
+        permissions: '0755'
+        content: |
+          #!/bin/bash
+          set -euxo pipefail
+
+          # 1. Disable Swap permanently
+          swapoff -a
+          sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
+          # 2. Load kernel modules & apply sysctl
+          modprobe overlay
+          modprobe br_netfilter
+          sysctl --system
+
+          # 3. Install & Configure containerd
+          apt-get update
+          apt-get install -y containerd
+          mkdir -p /etc/containerd
+          containerd config default > /etc/containerd/config.toml
+          sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+          systemctl restart containerd
+          systemctl enable containerd
+
+          # 4. Install Kubernetes v1.37 (Latest Stable)
+          mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.37/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+          echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.37/deb/ /' > /etc/apt/sources.list.d/kubernetes.list
+          apt-get update
+          apt-get install -y kubelet kubeadm kubectl
+          apt-mark hold kubelet kubeadm kubectl
+          systemctl enable --now kubelet
+
+          # 5. Initialize Control Plane
+          kubeadm init --apiserver-advertise-address=44.44.210.62 --pod-network-cidr=192.168.0.0/16
+
+          # 6. Configure kubectl for sromasan and root
+          mkdir -p /root/.kube /home/sromasan/.kube
+          cp /etc/kubernetes/admin.conf /root/.kube/config
+          cp /etc/kubernetes/admin.conf /home/sromasan/.kube/config
+          chown -R sromasan:sromasan /home/sromasan/.kube
+
+          # 7. Install Calico CNI v3.33.0
+          export KUBECONFIG=/etc/kubernetes/admin.conf
+          kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/tigera-operator.yaml
+          sleep 15
+          kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.33.0/manifests/custom-resources.yaml
+
+          # 8. Install MetalLB v0.14.9
+          kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.9/config/manifests/metallb-native.yaml
+
+          # 9. Save worker join command
+          kubeadm token create --print-join-command > /home/sromasan/join-command.sh
+          chmod +x /home/sromasan/join-command.sh
+          chown sromasan:sromasan /home/sromasan/join-command.sh
+    runcmd:
+      - /usr/local/bin/setup-k8s-master.sh > /var/log/k8s-bootstrap.log 2>&1
