@@ -1,0 +1,21 @@
+﻿# Cryptographic & TLS Private Keys (NEVER commit)
+*.key
+*.pem
+*.crt
+*.csr
+cosign.key
+certs/
+
+# Kubernetes Credentials
+kubeconfig
+*.kubeconfig
+admin.conf
+
+# Python & Local Artifacts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.DS_Store
+Thumbs.db
