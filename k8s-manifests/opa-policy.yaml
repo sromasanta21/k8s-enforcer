@@ -1,0 +1,108 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opa-rego-policies
+  namespace: security-system
+data:
+  admission.rego: |
+    package k8s.admission
+
+    import rego.v1
+
+    default allow := false
+
+    # Allow the request only if zero policy violations exist
+    allow if {
+        count(reasons) == 0
+    }
+
+    # Helper to extract containers from either a Pod or a Deployment
+    containers contains container if {
+        some container in input.spec.containers
+    }
+
+    containers contains container if {
+        some container in input.spec.template.spec.containers
+    }
+
+    # Rule 1 [NIST SP 800-53 AC-6]: Enforce non-root container execution
+    reasons contains msg if {
+        some container in containers
+        not container.securityContext.runAsNonRoot == true
+        msg := sprintf("[NIST-AC-6] Container '%s' must set securityContext.runAsNonRoot: true", [container.name])
+    }
+
+    # Rule 2 [NIST SP 800-53 CM-6 / AC-6]: Block privileged escalation
+    reasons contains msg if {
+        some container in containers
+        container.securityContext.allowPrivilegeEscalation == true
+        msg := sprintf("[NIST-CM-6] Container '%s' must not allow privilege escalation", [container.name])
+    }
+
+    # Rule 3 [NIST SP 800-53 CM-7]: Require dropping ALL kernel capabilities
+    reasons contains msg if {
+        some container in containers
+        not has_drop_all(container)
+        msg := sprintf("[NIST-CM-7] Container '%s' must drop ALL Linux capabilities (capabilities.drop: [\"ALL\"])", [container.name])
+    }
+
+    has_drop_all(container) if {
+        some cap in container.securityContext.capabilities.drop
+        upper(cap) == "ALL"
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opa-engine
+  namespace: security-system
+  labels:
+    app: opa-engine
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: opa-engine
+  template:
+    metadata:
+      labels:
+        app: opa-engine
+    spec:
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:1.1.0-static
+          args:
+            - "run"
+            - "--server"
+            - "--addr=0.0.0.0:8181"
+            - "/policies/admission.rego"
+          ports:
+            - containerPort: 8181
+          volumeMounts:
+            - name: policy-volume
+              mountPath: /policies
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: policy-volume
+          configMap:
+            name: opa-rego-policies
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: opa-svc
+  namespace: security-system
+spec:
+  selector:
+    app: opa-engine
+  ports:
+    - protocol: TCP
+      port: 8181
+      targetPort: 8181

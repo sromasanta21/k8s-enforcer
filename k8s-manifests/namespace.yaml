@@ -1,0 +1,7 @@
+# 1. Namespace manifest
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: security-system
+  labels:
+    app.kubernetes.io/part-of: zero-trust-k8s-enforcer
