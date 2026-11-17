@@ -1,0 +1,30 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: zero-trust-security-enforcer
+webhooks:
+  - name: enforcer.security-system.svc
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: Fail
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values:
+            - kube-system
+            - security-system
+    rules:
+      - apiGroups: ["", "apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "deployments"]
+        scope: "Namespaced"
+    clientConfig:
+      service:
+        name: webhook-enforcer-svc
+        namespace: security-system
+        path: "/validate"
+        port: 443
+      caBundle: "${CA_BUNDLE}"
