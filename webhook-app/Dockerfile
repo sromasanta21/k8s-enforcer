@@ -8,8 +8,8 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Download Cosign v2.4.1 Linux amd64 binary and make it executable
-ARG COSIGN_VERSION=v2.4.1
+# Download Cosign v3.1.4 Linux amd64 binary and make it executable
+ARG COSIGN_VERSION=v3.1.4
 RUN curl -fsSL "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
     -o /usr/local/bin/cosign \
     && chmod +x /usr/local/bin/cosign
