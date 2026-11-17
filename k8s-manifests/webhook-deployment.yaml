@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhook-enforcer
+  namespace: security-system
+  labels:
+    app: webhook-enforcer
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: webhook-enforcer
+  template:
+    metadata:
+      labels:
+        app: webhook-enforcer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: webhook
+          image: sromasanta21/k8s-webhook-enforcer:v1.0.0
+          imagePullPolicy: Always
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          env:
+            - name: OPA_URL
+              value: "http://opa-svc.security-system.svc.cluster.local:8181/v1/data/k8s/admission"
+            - name: REDIS_HOST
+              value: "redis-svc.security-system.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: COSIGN_PUB_KEY
+              value: "/etc/cosign/cosign.pub"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8443
+              scheme: HTTPS
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/webhook/certs
+              readOnly: true
+            - name: cosign-key
+              mountPath: /etc/cosign
+              readOnly: true
+            - name: tmp-dir
+              mountPath: /tmp
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: webhook-tls-certs
+        - name: cosign-key
+          secret:
+            secretName: cosign-pub-key
+        - name: tmp-dir
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webhook-enforcer-svc
+  namespace: security-system
+  labels:
+    app: webhook-enforcer
+spec:
+  selector:
+    app: webhook-enforcer
+  ports:
+    - name: https
+      port: 443
+      targetPort: 8443
+      protocol: TCP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: webhook-enforcer-hpa
+  namespace: security-system
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: webhook-enforcer
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
