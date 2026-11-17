@@ -1,0 +1,18 @@
+# Test 3: Signed image + Hardened securityContext (Tests Full Pass)
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-compliant-signed-pod
+  namespace: default
+spec:
+  containers:
+    - name: compliant-app
+      image: sromasanta21/k8s-webhook-enforcer:v1.0.0
+      command: ["sleep", "3600"]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]

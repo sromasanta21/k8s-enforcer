@@ -1,0 +1,12 @@
+# Test 2: Signed image, but runs as ROOT without dropping capabilities (Tests OPA Gate)
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-root-privileged-pod
+  namespace: default
+spec:
+  containers:
+    - name: insecure-app
+      image: sromasanta21/k8s-webhook-enforcer:v1.0.0
+      command: ["sleep", "3600"]
