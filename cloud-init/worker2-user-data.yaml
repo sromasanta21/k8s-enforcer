@@ -21,8 +21,8 @@ autoinstall:
             via: 44.44.210.1
         nameservers:
           addresses:
-            - 8.8.8.8
-            - 1.1.1.1
+            - 44.2.1.45
+            - 44.2.1.44
   identity:
     hostname: k8s-worker-2
     username: sromasan

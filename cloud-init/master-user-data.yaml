@@ -26,7 +26,7 @@ autoinstall:
   identity:
     hostname: k8s-master
     username: sromasan
-    password: "$6$rounds=4096$purduelab$9Q/1R.z5L8zX0kC1.A8kR0xR6K9V2vT5b2mH0jZ3e4S5L6P7w8Q9A0B1C2D3E4F5G6H7I8J9K0L1M2N3O4P5."
+    password: "$6$purduelab$h9libYewGPSKdFMtq58og0t/jOs6Hc/RFz/P3VH4JH7I9vdWnJTj328NcVkNN/9FAOWbobzsnJqA.b09zgGHh1"
   ssh:
     install-server: true
     allow-pw: true
@@ -81,7 +81,7 @@ autoinstall:
           systemctl enable --now kubelet
 
           # 5. Initialize Control Plane
-          kubeadm init --apiserver-advertise-address=44.44.210.62 --pod-network-cidr=192.168.0.0/16
+          kubeadm init --apiserver-advertise-address=44.44.210.61 --pod-network-cidr=192.168.0.0/16
 
           # 6. Configure kubectl for sromasan and root
           mkdir -p /root/.kube /home/sromasan/.kube

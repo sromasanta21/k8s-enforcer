@@ -58,8 +58,8 @@ kubectl create secret generic cosign-pub-key \
   --namespace="${NAMESPACE}" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-echo "[5/5] Injecting Base64 CA Bundle into 05-validating-webhook.yaml..."
+echo "[5/5] Injecting Base64 CA Bundle into validating-webhook.yaml..."
 CA_BUNDLE=$(base64 -w 0 < "${CERT_DIR}/ca.crt")
-sed -i "s|\${CA_BUNDLE}|${CA_BUNDLE}|g" k8s-manifests/05-validating-webhook.yaml
+sed -i "s|\${CA_BUNDLE}|${CA_BUNDLE}|g" k8s-manifests/validating-webhook.yaml
 
 echo "Done! TLS secrets, Cosign keys, and CA bundle are configured."
