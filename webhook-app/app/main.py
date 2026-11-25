@@ -7,10 +7,8 @@ from app.verifier import verify_image
 
 app = FastAPI(title="Zero-Trust Kubernetes Admission Webhook")
 
-# OPA microservice endpoint inside the security-system namespace
 OPA_URL = os.getenv("OPA_URL", "http://opa-svc:8181/v1/data/k8s/admission")
 
-# Prometheus Telemetry Metrics
 ADMISSION_REQUESTS = Counter(
     "admission_requests_total",
     "Total admission requests processed",
@@ -35,7 +33,7 @@ def build_admission_response(uid: str, allowed: bool, message: str, code: int = 
             "allowed": allowed,
             "status": {
                 "code": code,
-                "message": message
+                "message": message,
             },
         },
     }
@@ -53,15 +51,14 @@ async def get_metrics():
 @app.post("/validate")
 async def validate(request: Request):
     """Main admission webhook endpoint for Kubernetes"""
-    start_time = time.time()
+    start_time = time.perf_counter()
     body = await request.json()
 
     req = body.get("request", {})
     uid = req.get("uid", "")
     pod_object = req.get("object", {})
 
-    # Extract containers from a raw Pod or Deployment pod template
-    kind = req.get("kind", {}).get("kind","")
+    kind = req.get("kind", {}).get("kind", "")
     if kind == "Deployment":
         pod_spec = pod_object.get("spec", {}).get("template", {}).get("spec", {})
     else:
@@ -72,32 +69,36 @@ async def validate(request: Request):
     for container in containers:
         image_name = container["image"]
         is_valid, message, cache_hit = verify_image(image_name)
-        
+
         if cache_hit:
             CACHE_HITS.inc()
-        
+
         if not is_valid:
             ADMISSION_REQUESTS.labels(decision="denied", reason="cosign_failed").inc()
             VALIDATION_LATENCY.observe(time.perf_counter() - start_time)
             return build_admission_response(uid, allowed=False, message=message, code=403)
 
-    # 2. Policy gate: send the workload spec to Open Policy
+    # 2. Policy gate: send the workload spec to Open Policy Agent
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             opa_response = await client.post(OPA_URL, json={"input": pod_object})
             opa_response.raise_for_status()
             opa_result = opa_response.json().get("result", {})
     except httpx.RequestError as exc:
-        # Fail-closed: if OPA is unreachable, deny deployment for zero-trust safety
         ADMISSION_REQUESTS.labels(decision="denied", reason="opa_unreachable").inc()
         VALIDATION_LATENCY.observe(time.perf_counter() - start_time)
         return build_admission_response(
             uid, allowed=False, message=f"Policy engine unavailable: {exc}", code=503
-            )
+        )
 
-    # 3. Return the OPA decision to Kubernetes#   
+    # 3. Evaluate OPA Rego verdict (allow + reasons)
+    if not opa_result.get("allow", False):
+        reasons = opa_result.get("reasons", ["Denied by OPA security policy"])
+        deny_msg = "; ".join(reasons) if isinstance(reasons, list) else str(reasons)
+        ADMISSION_REQUESTS.labels(decision="denied", reason="opa_failed").inc()
+        VALIDATION_LATENCY.observe(time.perf_counter() - start_time)
+        return build_admission_response(uid, allowed=False, message=deny_msg, code=403)
+
     ADMISSION_REQUESTS.labels(decision="allowed", reason="opa_passed").inc()
     VALIDATION_LATENCY.observe(time.perf_counter() - start_time)
-    return build_admission_response(
-        uid, allowed=True, message="Checks passed"
-    )
+    return build_admission_response(uid, allowed=True, message="Checks passed")
