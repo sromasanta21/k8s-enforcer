@@ -17,6 +17,7 @@ spec:
       image: sromasanta21/k8s-webhook-enforcer:v1.0.0
       command: ["python3", "-c", "import time; print('Admitted via Redis digest cache'); time.sleep(3600)"]
       securityContext:
+        runAsNonRoot: true
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true
         capabilities:
