@@ -2,13 +2,11 @@ import os
 import subprocess
 import redis
 
-# Configuration via environment variables (with Kubernetes defaults)
 REDIS_HOST = os.getenv("REDIS_HOST", "redis-svc")
 REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
 COSIGN_PUB_KEY = os.getenv("COSIGN_PUB_KEY", "/etc/cosign/cosign.pub")
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "600"))
 
-# Initialize Redis client with short socket timeouts so slow cache never stalls admission
 redis_client = redis.Redis(
     host=REDIS_HOST,
     port=REDIS_PORT,
@@ -17,7 +15,7 @@ redis_client = redis.Redis(
     decode_responses=True,
 )
 
-def verify_image(image_name: str) -> tuple[bool, str]:
+def verify_image(image_name: str) -> tuple[bool, str, bool]:
     """
     Verifies a container image's cryptographic signature using Sigstore Cosign,
     with Redis caching to minimize registry round-trips.
@@ -27,31 +25,40 @@ def verify_image(image_name: str) -> tuple[bool, str]:
     """
     cache_key = f"verified:{image_name}"
 
-
-    #1. Check Redis cache first
+    # 1. Check Redis cache first
     try:
-        redis_client.get(cache_key)
-        return True, "image signature verified from cache"
-    except redis.Rediserror:
-        print(redis.Rediserror)
-    except subprocess.TimeoutExpired:
-        print(subprocess.TimeoutExpired)
+        cached = redis_client.get(cache_key)
+        if cached == "1":
+            return True, "Image signature verified from Redis cache", True
+    except redis.RedisError as exc:
+        print(f"Redis cache lookup failed (falling back to Cosign): {exc}")
 
-    #2. Run Cosign if not in cache
+    # 2. Run Cosign with writable HOME=/tmp and local public key verification
+    env = os.environ.copy()
+    env["HOME"] = "/tmp"
+    env["SIGSTORE_ROOT_FILE"] = "/tmp/.sigstore"
+
     try:
         result = subprocess.run(
-        ["cosign", "verify", "--key", "/etc/cosign/cosign.pub", image_name],
-        capture_output=True,
-        text=True,
-        timeout=10
+            [
+                "cosign",
+                "verify",
+                "--key",
+                COSIGN_PUB_KEY,
+                "--insecure-ignore-tlog=true",
+                image_name,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
         )
     except subprocess.TimeoutExpired:
         return False, f"Cosign verification timed out for {image_name}", False
     except FileNotFoundError:
         return False, "Cosign binary not found inside admission container", False
 
-
-    #3. Save to cache if valid and return (True, "Verified by Cosign")
+    # 3. Save to cache if valid
     if result.returncode == 0:
         try:
             redis_client.setex(cache_key, CACHE_TTL_SECONDS, "1")
